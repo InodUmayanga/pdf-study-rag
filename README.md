@@ -84,6 +84,8 @@ Re-running `python ingest.py` rebuilds the collection from scratch.
 ├── app.py             # Streamlit chat app with citations
 ├── ingest.py          # OCR + embedding pipeline → ChromaDB
 ├── config.py          # Shared settings, overridable via .env
+├── utils.py           # Pure helpers (unit-tested)
+├── tests/             # pytest suite
 ├── requirements.txt   # Pinned runtime dependencies
 ├── requirements-dev.txt
 ├── pyproject.toml     # Ruff lint config
@@ -97,7 +99,7 @@ Re-running `python ingest.py` rebuilds the collection from scratch.
 ```bash
 pip install -r requirements-dev.txt
 ruff check .                        # lint
-python -m compileall app.py ingest.py config.py
+pytest tests/ -v                    # tests
 ```
 
 CI runs the same checks on every push (`.github/workflows/ci.yml`).

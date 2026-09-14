@@ -15,11 +15,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install linter
-        run: pip install ruff==0.14.5
+      - name: Install tools
+        run: pip install ruff==0.14.5 pytest==8.4.2 python-dotenv==1.2.3
 
       - name: Lint
         run: ruff check .
 
       - name: Check files compile
-        run: python -m compileall -q app.py ingest.py config.py
+        run: python -m compileall -q app.py ingest.py config.py utils.py
+
+      - name: Test
+        run: pytest tests/ -v
