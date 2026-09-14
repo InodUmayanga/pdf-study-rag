@@ -1,0 +1,10 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+chroma_db/
+.streamlit/
+
+# Keep the folder but not the PDFs (add your own)
+pdfs/*
+!pdfs/.gitkeep
