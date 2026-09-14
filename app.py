@@ -7,18 +7,12 @@ warnings.filterwarnings("ignore")
 
 import chromadb
 import streamlit as st
-from dotenv import load_dotenv
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.groq import Groq
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
-load_dotenv()
-
-# --- Config ---
-DB_DIR = "./chroma_db"
-COLLECTION_NAME = "pdf_study_collection"
-EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+from config import COLLECTION_NAME, DB_DIR, EMBED_MODEL, LLM_MODEL
 
 
 @st.cache_resource
@@ -33,7 +27,7 @@ def init_index():
         )
         st.stop()
 
-    llm = Groq(api_key=api_key, model="openai/gpt-oss-120b")
+    llm = Groq(api_key=api_key, model=LLM_MODEL)
 
     Settings.llm = llm
     Settings.embed_model = embed_model
@@ -116,7 +110,11 @@ if prompt := st.chat_input("Ask a question about your PDFs..."):
     # Assistant response
     with st.chat_message("assistant"):
         with st.spinner("Searching your PDFs..."):
-            response = query_engine.query(prompt)
+            try:
+                response = query_engine.query(prompt)
+            except Exception as exc:
+                st.error(f"Query failed: {exc}")
+                st.stop()
             sources = format_sources(response.source_nodes)
             full_response = str(response) + sources
 
@@ -150,7 +148,7 @@ with st.sidebar:
         "to answer questions from your PDFs."
     )
     st.write(f"**Embedding model:** `{EMBED_MODEL}`")
-    st.write(f"**LLM:** Groq (openai/gpt-oss-120b)")
+    st.write(f"**LLM:** Groq (`{LLM_MODEL}`)")
     st.write(f"**Vector DB:** `{DB_DIR}`")
 
     if st.button("🗑️ Clear Chat"):

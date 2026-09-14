@@ -1,0 +1,14 @@
+[project]
+name = "pdf-study-rag"
+version = "0.1.0"
+description = "Chat with your PDF study materials — local RAG with page-level citations"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# warnings.filterwarnings must run before heavy imports
+"app.py" = ["E402"]
+"ingest.py" = ["E402"]

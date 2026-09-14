@@ -21,12 +21,14 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.llms.groq import Groq
 from rapidocr_onnxruntime import RapidOCR
 
-# --- Config ---
-PDF_DIR = "./pdfs"
-DB_DIR = "./chroma_db"
-COLLECTION_NAME = "pdf_study_collection"
-EMBED_MODEL = "BAAI/bge-small-en-v1.5"
-RENDER_SCALE = 2  # ~144 DPI; increase for better OCR on small text
+from config import (
+    COLLECTION_NAME,
+    DB_DIR,
+    EMBED_MODEL,
+    LLM_MODEL,
+    PDF_DIR,
+    RENDER_SCALE,
+)
 
 
 def extract_documents(pdf_dir):
@@ -84,7 +86,7 @@ def main():
     api_key = os.getenv("GROQ_API_KEY", "")
     llm = None
     if api_key:
-        llm = Groq(api_key=api_key, model="openai/gpt-oss-120b")
+        llm = Groq(api_key=api_key, model=LLM_MODEL)
         print("Groq LLM configured.")
     else:
         print(
@@ -102,10 +104,9 @@ def main():
     # --- ChromaDB client (fresh rebuild each run) ---
     print(f"Initializing ChromaDB at '{DB_DIR}' ...")
     db = chromadb.PersistentClient(path=DB_DIR)
-    try:
+    existing = {c.name for c in db.list_collections()}
+    if COLLECTION_NAME in existing:
         db.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
     chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     storage_context = StorageContext.from_defaults(
@@ -130,7 +131,4 @@ def main():
 
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
-
-    load_dotenv()
     main()
