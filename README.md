@@ -4,7 +4,7 @@ A local RAG (retrieval-augmented generation) app that lets you chat with your
 PDF study materials and get answers with page-level citations.
 
 Built with **LlamaIndex** + **ChromaDB** + **Streamlit**. Answers are generated
-by **Groq** (llama-3.3-70b-versatile) and embeddings run locally with
+by **Groq** (openai/gpt-oss-120b) and embeddings run locally with
 **BAAI/bge-small-en-v1.5** — so the only API key you need is a free Groq key.
 
 Because the source PDFs are image-based scans/slides, ingestion renders each
@@ -50,7 +50,7 @@ expandable view of the source excerpts.
 | Images → text | RapidOCR (ONNX runtime, local) |
 | Text → vectors | HuggingFace `bge-small-en-v1.5` (local) |
 | Vector store | ChromaDB (`./chroma_db`) |
-| Q&A LLM | Groq `llama-3.3-70b-versatile` |
+| Q&A LLM | Groq `openai/gpt-oss-120b` |
 | UI | Streamlit chat |
 
 Re-running `python ingest.py` rebuilds the collection from scratch.

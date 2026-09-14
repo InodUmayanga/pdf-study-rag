@@ -84,7 +84,7 @@ def main():
     api_key = os.getenv("GROQ_API_KEY", "")
     llm = None
     if api_key:
-        llm = Groq(api_key=api_key, model="llama-3.3-70b-versatile")
+        llm = Groq(api_key=api_key, model="openai/gpt-oss-120b")
         print("Groq LLM configured.")
     else:
         print(

@@ -33,7 +33,7 @@ def init_index():
         )
         st.stop()
 
-    llm = Groq(api_key=api_key, model="llama-3.3-70b-versatile")
+    llm = Groq(api_key=api_key, model="openai/gpt-oss-120b")
 
     Settings.llm = llm
     Settings.embed_model = embed_model
@@ -150,7 +150,7 @@ with st.sidebar:
         "to answer questions from your PDFs."
     )
     st.write(f"**Embedding model:** `{EMBED_MODEL}`")
-    st.write(f"**LLM:** Groq (llama-3.3-70b-versatile)")
+    st.write(f"**LLM:** Groq (openai/gpt-oss-120b)")
     st.write(f"**Vector DB:** `{DB_DIR}`")
 
     if st.button("🗑️ Clear Chat"):
