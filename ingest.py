@@ -3,6 +3,10 @@
 The PDFs are image-based (no text layer), so each page is rendered with
 PyMuPDF and OCR'd with RapidOCR (ONNX, runs locally — no Tesseract needed).
 Each page becomes one Document with file_name / page_label metadata.
+
+``build_index`` is the reusable entry point; the evaluation harness in
+``evals/`` calls it with a temporary database directory so the eval and
+the CLI exercise exactly the same pipeline.
 """
 
 import os
@@ -18,34 +22,41 @@ from llama_index.core import Document, StorageContext, VectorStoreIndex
 from llama_index.core.settings import Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.llms.groq import Groq
 from rapidocr_onnxruntime import RapidOCR
 
 from config import (
     COLLECTION_NAME,
     DB_DIR,
     EMBED_MODEL,
-    LLM_MODEL,
     PDF_DIR,
     RENDER_SCALE,
 )
 
+# Chunking used at ingestion time. Retrieval quality is measured against
+# these values (see evals/), so change them deliberately.
+CHUNK_SIZE = 1024
+CHUNK_OVERLAP = 128
 
-def extract_documents(pdf_dir):
-    """OCR every page of every PDF into a llama-index Document."""
-    ocr = RapidOCR()
-    documents = []
-    pdf_files = sorted(
+
+def list_pdfs(pdf_dir):
+    """Sorted PDF file names in ``pdf_dir`` (deterministic order)."""
+    return sorted(
         f for f in os.listdir(pdf_dir) if f.lower().endswith(".pdf")
     )
 
-    for file_name in pdf_files:
+
+def extract_documents(pdf_dir, render_scale=RENDER_SCALE, ocr=None):
+    """OCR every page of every PDF into a llama-index Document."""
+    ocr = ocr or RapidOCR()
+    documents = []
+
+    for file_name in list_pdfs(pdf_dir):
         path = os.path.join(pdf_dir, file_name)
         pdf = pymupdf.open(path)
         print(f"  {file_name}: {len(pdf)} page(s)")
         for page_num, page in enumerate(pdf, 1):
             pix = page.get_pixmap(
-                matrix=pymupdf.Matrix(RENDER_SCALE, RENDER_SCALE),
+                matrix=pymupdf.Matrix(render_scale, render_scale),
                 alpha=False,
             )
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
@@ -68,66 +79,68 @@ def extract_documents(pdf_dir):
     return documents
 
 
-def main():
-    if not os.path.isdir(PDF_DIR):
-        print(f"ERROR: '{PDF_DIR}' directory not found.")
-        sys.exit(1)
+def build_index(
+    pdf_dir,
+    db_dir,
+    collection_name,
+    embed_model=EMBED_MODEL,
+    render_scale=RENDER_SCALE,
+    show_progress=False,
+):
+    """OCR ``pdf_dir`` and (re)build the ChromaDB collection from scratch.
 
-    pdf_files = [
-        f for f in os.listdir(PDF_DIR) if f.lower().endswith(".pdf")
-    ]
-    print(f"Found {len(pdf_files)} PDF(s) in '{PDF_DIR}/'")
+    Returns ``(index, documents)``. ``embed_model`` may be a model name or
+    an embedding object.
+    """
+    if isinstance(embed_model, str):
+        embed_model = HuggingFaceEmbedding(model_name=embed_model)
 
-    # --- Embedding model (local, free) ---
-    print(f"Loading embedding model: {EMBED_MODEL} ...")
-    embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
-
-    # --- LLM (Groq) ---
-    api_key = os.getenv("GROQ_API_KEY", "")
-    llm = None
-    if api_key:
-        llm = Groq(api_key=api_key, model=LLM_MODEL)
-        print("Groq LLM configured.")
-    else:
-        print(
-            "WARNING: GROQ_API_KEY not set. "
-            "Ingestion will proceed (embeddings only); "
-            "LLM will be configured at query time in app.py."
-        )
-
-    # --- Global settings ---
-    Settings.llm = llm
     Settings.embed_model = embed_model
-    Settings.chunk_size = 1024
-    Settings.chunk_overlap = 128
+    Settings.chunk_size = CHUNK_SIZE
+    Settings.chunk_overlap = CHUNK_OVERLAP
 
-    # --- ChromaDB client (fresh rebuild each run) ---
-    print(f"Initializing ChromaDB at '{DB_DIR}' ...")
-    db = chromadb.PersistentClient(path=DB_DIR)
-    existing = {c.name for c in db.list_collections()}
-    if COLLECTION_NAME in existing:
-        db.delete_collection(COLLECTION_NAME)
-    chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
+    db = chromadb.PersistentClient(path=db_dir)
+    existing = {
+        c if isinstance(c, str) else c.name for c in db.list_collections()
+    }
+    if collection_name in existing:
+        db.delete_collection(collection_name)
+    chroma_collection = db.get_or_create_collection(collection_name)
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     storage_context = StorageContext.from_defaults(
         vector_store=vector_store
     )
 
-    # --- OCR PDFs ---
-    print("Extracting text from PDFs via OCR (this can take a while) ...")
-    documents = extract_documents(PDF_DIR)
-    print(f"Extracted text from {len(documents)} page(s).")
-
-    # --- Build index ---
-    print("Generating embeddings and storing in ChromaDB ...")
-    VectorStoreIndex.from_documents(
+    documents = extract_documents(pdf_dir, render_scale=render_scale)
+    index = VectorStoreIndex.from_documents(
         documents,
         storage_context=storage_context,
-        show_progress=True,
+        embed_model=embed_model,
+        show_progress=show_progress,
+    )
+    return index, documents
+
+
+def main():
+    if not os.path.isdir(PDF_DIR):
+        print(f"ERROR: '{PDF_DIR}' directory not found.")
+        sys.exit(1)
+
+    pdf_files = list_pdfs(PDF_DIR)
+    print(f"Found {len(pdf_files)} PDF(s) in '{PDF_DIR}/'")
+    if not pdf_files:
+        print("Nothing to ingest — add PDFs to the folder and re-run.")
+        sys.exit(1)
+
+    print(f"Loading embedding model: {EMBED_MODEL} ...")
+    print(f"Initializing ChromaDB at '{DB_DIR}' ...")
+    print("Extracting text from PDFs via OCR (this can take a while) ...")
+    _, documents = build_index(
+        PDF_DIR, DB_DIR, COLLECTION_NAME, show_progress=True
     )
 
     print(f"\nDone! {len(documents)} pages ingested into '{DB_DIR}/'.")
-    print("You can now run:  streamlit run app.py")
+    print("The Groq LLM is configured at query time (streamlit run app.py).")
 
 
 if __name__ == "__main__":

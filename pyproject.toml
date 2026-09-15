@@ -12,3 +12,13 @@ target-version = "py312"
 # warnings.filterwarnings must run before heavy imports
 "app.py" = ["E402"]
 "ingest.py" = ["E402"]
+"evals/run_eval.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "eval: end-to-end retrieval evaluation (needs the full requirements and downloads the embedding model)",
+]
+# The eval test is opt-in: `pytest -m eval tests/test_eval.py -v -s`
+addopts = "-m 'not eval'"

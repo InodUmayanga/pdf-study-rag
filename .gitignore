@@ -8,6 +8,8 @@ __pycache__/
 .ruff_cache/
 chroma_db/
 .streamlit/
+evals/.tmp/
+evals/results.json
 
 # Keep the folder but not the PDFs (add your own)
 pdfs/*

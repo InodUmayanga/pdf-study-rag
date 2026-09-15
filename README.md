@@ -21,6 +21,7 @@ Tesseract install needed).
 - Local OCR and embeddings — your PDFs are never uploaded; only the question
   and the retrieved passages are sent to the Groq API (see *Data flow*)
 - Rebuildable ChromaDB index; drop in new PDFs and re-run `ingest.py`
+- Reproducible retrieval evaluation (`evals/`), run in CI (see *Evaluation*)
 - All settings overridable via `.env` (see `.env.example`)
 
 ## Data flow
@@ -114,35 +115,76 @@ docker run --rm -v ./pdfs:/app/pdfs -v ./chroma_db:/app/chroma_db \
 | Q&A LLM | Groq `openai/gpt-oss-120b` |
 | UI | Streamlit chat |
 
-Re-running `python ingest.py` rebuilds the collection from scratch.
+Re-running `python ingest.py` rebuilds the collection from scratch. Chunking
+(1024 tokens, 128 overlap) is set in `ingest.py`; the evaluation below is the
+regression guard for changing it.
 
 ## Project layout
 
 ```
 ├── app.py             # Streamlit chat app (thin UI over rag.py)
-├── ingest.py          # OCR + embedding pipeline → ChromaDB
+├── ingest.py          # OCR + embedding pipeline → ChromaDB (build_index)
 ├── rag.py             # Open the index, build retriever / grounded query engine
 ├── prompts.py         # Grounded QA and refine prompt text, refusal sentence
 ├── config.py          # Shared settings, overridable via .env
 ├── utils.py           # Pure helpers (unit-tested)
-├── tests/             # pytest suite
+├── tests/             # pytest suite (test_eval.py is opt-in, see below)
+├── evals/             # Fixture text, generator, questions, eval runner
 ├── requirements.txt   # Pinned runtime dependencies
 ├── requirements-dev.txt
-├── pyproject.toml     # Ruff lint config
+├── pyproject.toml     # Ruff + pytest config
 ├── Dockerfile
 ├── .env.example       # copy to .env and add GROQ_API_KEY
 └── pdfs/              # drop your PDFs here (not committed to git)
 ```
+
+## Evaluation
+
+`evals/` is a small, reproducible check that the pipeline retrieves the right
+page — the thing citations depend on.
+
+- `evals/fixture_text.py` — seven pages of original study notes (linear
+  algebra and probability). Each page contains facts found on no other page,
+  so every question has exactly one correct page.
+- `evals/make_fixture.py` — renders those pages to `sample_notes.pdf` with
+  PyMuPDF. The PDF is generated on demand and never committed, so the
+  repository contains no course material.
+- `evals/questions.json` — 12 questions with the page that answers each,
+  plus 3 questions the notes do not cover.
+- `evals/run_eval.py` — builds a throwaway index from the fixture with the
+  real ingestion code (`ingest.build_index`), reopens it the way the app does
+  (`rag.load_index`) and retrieves for every question.
+
+Retrieval metrics — offline, no API key needed: **hit@1** and **hit@3** (is
+the expected page the first / among the first three unique pages retrieved)
+and **MRR**. When `GROQ_API_KEY` is set, the script also asks the grounded
+query engine every question and reports how often in-scope answers cite the
+expected page inline and how often out-of-scope questions get the fixed
+refusal sentence.
+
+```bash
+python -m evals.run_eval              # retrieval, plus answer checks if a key is set
+python -m evals.run_eval --no-llm     # retrieval only
+pytest -m eval tests/test_eval.py -v -s   # the retrieval run as a gated test
+```
+
+Results are written to `evals/results.json` (gitignored). The test fails when
+hit@3 drops below `EVAL_MIN_HIT3` (default `0.7`), and CI runs it in a
+separate `eval` job that uploads `results.json` as an artifact. The fixture
+is deliberately small: treat the numbers as a regression guard for chunking,
+embedding-model and prompt changes, not as a benchmark.
 
 ## Development
 
 ```bash
 pip install -r requirements-dev.txt
 ruff check .                        # lint
-pytest tests/ -v                    # tests
+pytest tests/ -v                    # unit tests (eval excluded by default)
+pytest -m eval tests/test_eval.py -v -s   # full-pipeline retrieval eval
 ```
 
-CI runs the same checks on every push (`.github/workflows/ci.yml`).
+CI runs the same checks on every push (`.github/workflows/ci.yml`): a fast
+`lint` job (Ruff, compile check, unit tests) and the `eval` job above.
 
 ## Limitations and next steps
 
@@ -151,10 +193,12 @@ CI runs the same checks on every push (`.github/workflows/ci.yml`).
   helps with small text; a text-layer-first path would help more.
 - **Grounding is prompted, not enforced.** The sources listed under an answer
   are the passages that were retrieved; the inline `[file p.N]` citations are
-  written by the model, and how faithfully answers stick to the passages is
-  not yet measured.
-- **No answer-quality evaluation yet.** There is no golden question set, so
-  "good retrieval" is currently a judgement rather than a number.
+  written by the model. The answer checks in `evals/run_eval.py` measure
+  whether those citations point at the expected page and whether out-of-scope
+  questions are refused, but they need a Groq key and are not gated in CI.
+- **The eval fixture is synthetic.** Seven clean pages are a regression guard,
+  not a measure of quality on real lecture notes; a golden question set over
+  actual study material would be the next step.
 - **Single-user, no auth.** The Streamlit app is meant to run on your own
   machine; the ChromaDB index is rebuilt from scratch on every ingest.
 
