@@ -5,22 +5,17 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-import chromadb
 import streamlit as st
-from llama_index.core import Settings, StorageContext, VectorStoreIndex
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.llms.groq import Groq
-from llama_index.vector_stores.chroma import ChromaVectorStore
 
-from config import COLLECTION_NAME, DB_DIR, EMBED_MODEL, LLM_MODEL
+from config import COLLECTION_NAME, DB_DIR, EMBED_MODEL, LLM_MODEL, TOP_K
+from prompts import is_not_covered
+from rag import build_query_engine, load_index, make_llm
 from utils import format_sources
 
 
 @st.cache_resource
-def init_index():
-    """Load the persisted ChromaDB index."""
-    embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
-
+def init_query_engine():
+    """Open the persisted index and build the grounded query engine."""
     api_key = os.getenv("GROQ_API_KEY", "")
     if not api_key:
         st.error(
@@ -28,26 +23,9 @@ def init_index():
         )
         st.stop()
 
-    llm = Groq(api_key=api_key, model=LLM_MODEL)
-
-    Settings.llm = llm
-    Settings.embed_model = embed_model
-    Settings.chunk_size = 512
-    Settings.chunk_overlap = 64
-    Settings.context_window = 32768
-    Settings.num_output = 2048
-
-    db = chromadb.PersistentClient(path=DB_DIR)
-    chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
-    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-    storage_context = StorageContext.from_defaults(
-        vector_store=vector_store
-    )
-
-    index = VectorStoreIndex.from_vector_store(
-        vector_store, storage_context=storage_context
-    )
-    return index
+    llm = make_llm(api_key, LLM_MODEL)
+    index = load_index(DB_DIR, COLLECTION_NAME, EMBED_MODEL)
+    return build_query_engine(index, top_k=TOP_K, llm=llm)
 
 
 # --- Streamlit UI ---
@@ -68,11 +46,7 @@ if not os.path.isdir(DB_DIR):
     )
     st.stop()
 
-index = init_index()
-query_engine = index.as_query_engine(
-    similarity_top_k=3,
-    response_mode="simple_summarize",
-)
+query_engine = init_query_engine()
 
 # --- Chat session state ---
 if "messages" not in st.session_state:
@@ -100,14 +74,27 @@ if prompt := st.chat_input("Ask a question about your PDFs..."):
             except Exception as exc:
                 st.error(f"Query failed: {exc}")
                 st.stop()
-            sources = format_sources(response.source_nodes)
-            full_response = str(response) + sources
+            answer = str(response)
+            not_covered = is_not_covered(answer)
+            if not_covered:
+                # Nothing relevant was found; don't present the nearest
+                # passages as if they supported an answer.
+                full_response = answer
+            else:
+                full_response = answer + format_sources(
+                    response.source_nodes
+                )
 
         st.markdown(full_response)
 
         # Show source excerpts in expander
         if response.source_nodes:
-            with st.expander("View source excerpts"):
+            label = (
+                "Closest passages (not used — no answer found)"
+                if not_covered
+                else "View source excerpts"
+            )
+            with st.expander(label):
                 for i, node in enumerate(
                     response.source_nodes, 1
                 ):
@@ -135,6 +122,7 @@ with st.sidebar:
     st.write(f"**Embedding model:** `{EMBED_MODEL}`")
     st.write(f"**LLM:** Groq (`{LLM_MODEL}`)")
     st.write(f"**Vector DB:** `{DB_DIR}`")
+    st.write(f"**Passages per question:** {TOP_K}")
 
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []

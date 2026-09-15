@@ -15,6 +15,9 @@ Tesseract install needed).
 
 - Chat UI with conversation history and expandable source excerpts
 - Page-level citations (file name, page, relevance score)
+- Grounded answers: the model is told to answer only from the retrieved
+  passages, to cite them inline as `[file p.N]`, and to reply with a fixed
+  sentence (`The notes don't cover this.`) when they don't contain the answer
 - Local OCR and embeddings — your PDFs are never uploaded; only the question
   and the retrieved passages are sent to the Groq API (see *Data flow*)
 - Rebuildable ChromaDB index; drop in new PDFs and re-run `ingest.py`
@@ -42,9 +45,9 @@ flowchart LR
     subgraph Query["Query — streamlit run app.py"]
         Q[User question] --> R[Top-k retrieval from ChromaDB]
         F -.-> R
-        R --> P[Prompt with retrieved passages]
+        R --> P[Grounded prompt with retrieved passages - prompts.py]
         P --> G[Groq LLM - remote]
-        G --> S[Answer + page-level citations in Streamlit]
+        G --> S[Answer with inline page citations, or fixed refusal]
     end
 ```
 
@@ -76,7 +79,11 @@ streamlit run app.py
 ```
 
 Then open http://localhost:8501 and ask questions about your documents.
-Each answer includes citations and an expandable view of the source excerpts.
+Each answer cites the passages it used and comes with an expandable view of
+the source excerpts. If nothing relevant is found, the app says
+*The notes don't cover this.* and shows the closest passages separately,
+clearly marked as not used. `TOP_K` (default 3) controls how many passages
+are retrieved per question.
 
 ## Docker
 
@@ -102,6 +109,8 @@ docker run --rm -v ./pdfs:/app/pdfs -v ./chroma_db:/app/chroma_db \
 | Images → text | RapidOCR (ONNX runtime, local) |
 | Text → vectors | HuggingFace `bge-small-en-v1.5` (local) |
 | Vector store | ChromaDB (`./chroma_db`) |
+| Retrieval | top-k similarity (`TOP_K`, default 3) |
+| Prompting | grounded QA + refine templates (`prompts.py`) |
 | Q&A LLM | Groq `openai/gpt-oss-120b` |
 | UI | Streamlit chat |
 
@@ -110,8 +119,10 @@ Re-running `python ingest.py` rebuilds the collection from scratch.
 ## Project layout
 
 ```
-├── app.py             # Streamlit chat app with citations
+├── app.py             # Streamlit chat app (thin UI over rag.py)
 ├── ingest.py          # OCR + embedding pipeline → ChromaDB
+├── rag.py             # Open the index, build retriever / grounded query engine
+├── prompts.py         # Grounded QA and refine prompt text, refusal sentence
 ├── config.py          # Shared settings, overridable via .env
 ├── utils.py           # Pure helpers (unit-tested)
 ├── tests/             # pytest suite
@@ -138,9 +149,10 @@ CI runs the same checks on every push (`.github/workflows/ci.yml`).
 - **OCR errors propagate.** Every page is OCR'd, even born-digital ones, so
   a misread word is a misread word at retrieval time. Raising `RENDER_SCALE`
   helps with small text; a text-layer-first path would help more.
-- **Citations are retrieval-derived.** The sources shown under an answer are
-  the passages that were retrieved and given to the model; how faithfully the
-  answer sticks to them is not yet measured.
+- **Grounding is prompted, not enforced.** The sources listed under an answer
+  are the passages that were retrieved; the inline `[file p.N]` citations are
+  written by the model, and how faithfully answers stick to the passages is
+  not yet measured.
 - **No answer-quality evaluation yet.** There is no golden question set, so
   "good retrieval" is currently a judgement rather than a number.
 - **Single-user, no auth.** The Streamlit app is meant to run on your own
@@ -153,6 +165,8 @@ CI runs the same checks on every push (`.github/workflows/ci.yml`).
   Groq API at query time.
 - OCR quality depends on the source images; if results look poor, set
   `RENDER_SCALE=3` in `.env` and re-run `python ingest.py`.
+- If answers miss context that is in your notes, try `TOP_K=5` in `.env`;
+  the sidebar shows the value in use.
 - The pipeline renders and OCRs every page, so it handles scanned/image
   PDFs and born-digital PDFs alike.
 

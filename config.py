@@ -13,3 +13,5 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 # ~144 DPI render for OCR; raise to 3 for small/dense text
 RENDER_SCALE = int(os.getenv("RENDER_SCALE", "2"))
+# Number of passages retrieved per question and handed to the LLM
+TOP_K = int(os.getenv("TOP_K", "3"))
