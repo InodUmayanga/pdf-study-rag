@@ -168,11 +168,31 @@ python -m evals.run_eval --no-llm     # retrieval only
 pytest -m eval tests/test_eval.py -v -s   # the retrieval run as a gated test
 ```
 
-Results are written to `evals/results.json` (gitignored). The test fails when
-hit@3 drops below `EVAL_MIN_HIT3` (default `0.7`), and CI runs it in a
-separate `eval` job that uploads `results.json` as an artifact. The fixture
-is deliberately small: treat the numbers as a regression guard for chunking,
-embedding-model and prompt changes, not as a benchmark.
+The script writes `evals/results.json` and the test `evals/results-pytest.json`
+(both gitignored). The test fails when hit@3 drops below `EVAL_MIN_HIT3`
+(default `0.9`) or hit@1 below `EVAL_MIN_HIT1` (default `0.75`); the answer
+checks are reported, not gated, because they cost API calls and vary between
+runs (`EVAL_WITH_LLM=1` includes them in the test). CI runs the test in a
+separate `eval` job and uploads the results as an artifact.
+
+**Measured on 2026-09-15** (macOS arm64, `bge-small-en-v1.5`, chunk 1024/128,
+top_k 3), 12 in-scope questions:
+
+| Metric | Result |
+|---|---|
+| hit@1 | 0.92 (11/12 — the "singular matrix" question ranked the matrices page above the determinants page) |
+| hit@3 | 1.00 |
+| MRR | 0.96 |
+| Answer checks (`openai/gpt-oss-120b`, one run) | 12/12 in-scope questions answered with the expected page cited; 3/3 out-of-scope questions got the exact refusal sentence |
+
+The first scored run reported only 7/12 answers as citing the expected page.
+Reading the raw answers showed every one cited the right page; the model had
+written five of them with full-width brackets (`【sample_notes.pdf p.2】`)
+instead of `[...]`. Citations are now normalised (`prompts.normalize_citations`)
+before display and scoring — the kind of thing the eval exists to catch.
+
+The fixture is deliberately small: treat the numbers as a regression guard for
+chunking, embedding-model and prompt changes, not as a benchmark.
 
 ## Development
 
@@ -195,7 +215,8 @@ CI runs the same checks on every push (`.github/workflows/ci.yml`): a fast
   are the passages that were retrieved; the inline `[file p.N]` citations are
   written by the model. The answer checks in `evals/run_eval.py` measure
   whether those citations point at the expected page and whether out-of-scope
-  questions are refused, but they need a Groq key and are not gated in CI.
+  questions are refused, but they need a Groq key, vary between runs and are
+  not gated in CI.
 - **The eval fixture is synthetic.** Seven clean pages are a regression guard,
   not a measure of quality on real lecture notes; a golden question set over
   actual study material would be the next step.

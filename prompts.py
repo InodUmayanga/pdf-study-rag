@@ -62,3 +62,14 @@ def is_not_covered(answer):
     return (answer or "").strip().rstrip(".").lower() == (
         NOT_COVERED.rstrip(".").lower()
     )
+
+
+# gpt-oss models sometimes write citations with full-width brackets, e.g.
+# 【notes.pdf p.2】, even when asked for [notes.pdf p.2]. Normalise before
+# displaying or scoring an answer.
+_BRACKETS = str.maketrans({"【": "[", "】": "]", "［": "[", "］": "]"})
+
+
+def normalize_citations(answer):
+    """Map full-width citation brackets to the ASCII ``[...]`` form."""
+    return (answer or "").translate(_BRACKETS)

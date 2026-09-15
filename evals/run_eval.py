@@ -23,7 +23,8 @@ Usage (from the repository root):
     python -m evals.run_eval --no-llm   # retrieval only
     pytest -m eval tests/test_eval.py -v -s   # gated version (retrieval)
 
-Results are written to evals/results.json (gitignored).
+Results are written to evals/results.json (gitignored); the pytest run
+writes evals/results-pytest.json so the two never overwrite each other.
 """
 
 import argparse
@@ -47,7 +48,7 @@ if ROOT not in sys.path:
 from config import EMBED_MODEL, LLM_MODEL, TOP_K
 from evals.make_fixture import FIXTURE_NAME, fixture_pages, write_fixture
 from ingest import CHUNK_OVERLAP, CHUNK_SIZE, build_index
-from prompts import NOT_COVERED, is_not_covered
+from prompts import NOT_COVERED, is_not_covered, normalize_citations
 from rag import (
     build_query_engine,
     build_retriever,
@@ -62,7 +63,9 @@ QUESTIONS_PATH = os.path.join(EVAL_DIR, "questions.json")
 RESULTS_PATH = os.path.join(EVAL_DIR, "results.json")
 COLLECTION = "eval_notes"
 
-# Inline citation as requested by the prompt: [<file_name> p.<page>]
+# Inline citation as requested by the prompt: [<file_name> p.<page>].
+# Tolerates "[ file p. 3 ]" and "[file, p.3]"; full-width brackets are
+# normalised away by prompts.normalize_citations before matching.
 CITATION_RE = re.compile(r"\[\s*([^\[\]]+?)\s*,?\s*p\.\s*(\d+)\s*\]")
 
 
@@ -172,7 +175,7 @@ def evaluate_answers(index, questions, top_k, api_key, llm_model=LLM_MODEL):
             "question": q["question"],
         }
         try:
-            answer = str(engine.query(q["question"]))
+            answer = normalize_citations(str(engine.query(q["question"])))
         except Exception as exc:  # keep going; report at the end
             row["error"] = f"{type(exc).__name__}: {exc}"
             rows.append(row)
@@ -214,6 +217,9 @@ def run(top_k=TOP_K, with_llm=None, keep=False, results_path=RESULTS_PATH):
     api_key = os.getenv("GROQ_API_KEY", "")
     if with_llm is None:
         with_llm = bool(api_key)
+        answers_skipped = None if with_llm else "GROQ_API_KEY is not set"
+    else:
+        answers_skipped = None if with_llm else "answer checks not requested"
     if with_llm and not api_key:
         raise SystemExit("GROQ_API_KEY is not set (use --no-llm).")
 
@@ -238,6 +244,7 @@ def run(top_k=TOP_K, with_llm=None, keep=False, results_path=RESULTS_PATH):
                 if with_llm
                 else None
             ),
+            "answers_skipped": answers_skipped,
         }
         results["seconds"] = round(time.time() - started, 1)
     finally:
@@ -279,7 +286,8 @@ def print_report(results):
 
     a = results.get("answers")
     if not a:
-        print("\nAnswer checks skipped (no GROQ_API_KEY, or --no-llm).")
+        reason = results.get("answers_skipped") or "not run"
+        print(f"\nAnswer checks skipped: {reason}.")
         return
     print(
         f"\nAnswers via {a['model']}: in-scope answered "

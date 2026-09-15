@@ -8,7 +8,7 @@ warnings.filterwarnings("ignore")
 import streamlit as st
 
 from config import COLLECTION_NAME, DB_DIR, EMBED_MODEL, LLM_MODEL, TOP_K
-from prompts import is_not_covered
+from prompts import is_not_covered, normalize_citations
 from rag import build_query_engine, load_index, make_llm
 from utils import format_sources
 
@@ -74,7 +74,7 @@ if prompt := st.chat_input("Ask a question about your PDFs..."):
             except Exception as exc:
                 st.error(f"Query failed: {exc}")
                 st.stop()
-            answer = str(response)
+            answer = normalize_citations(str(response))
             not_covered = is_not_covered(answer)
             if not_covered:
                 # Nothing relevant was found; don't present the nearest

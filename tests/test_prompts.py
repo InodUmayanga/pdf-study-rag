@@ -8,6 +8,7 @@ from prompts import (
     GROUNDED_REFINE_PROMPT,
     NOT_COVERED,
     is_not_covered,
+    normalize_citations,
 )
 
 
@@ -58,3 +59,16 @@ def test_top_k_default_and_override(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(config)
+
+
+def test_normalize_citations_maps_fullwidth_brackets():
+    # Seen from gpt-oss-120b in evals/run_eval.py output.
+    assert (
+        normalize_citations("A 2 by 4 matrix【sample_notes.pdf p.2】")
+        == "A 2 by 4 matrix[sample_notes.pdf p.2]"
+    )
+    assert normalize_citations("［notes.pdf p.7］") == "[notes.pdf p.7]"
+    assert normalize_citations("plain [notes.pdf p.1]") == (
+        "plain [notes.pdf p.1]"
+    )
+    assert normalize_citations(None) == ""
